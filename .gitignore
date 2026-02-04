@@ -1,0 +1,10 @@
+# Secrets — never commit
+.env
+credentials.json
+token.json
+
+# Disposable intermediates
+.tmp/
+
+# Python
+__pycache__/

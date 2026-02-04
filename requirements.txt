@@ -1,0 +1,7 @@
+# Scrub Squad Lead Generator — Python dependencies
+# Versions pinned for reproducibility in GitHub Actions.
+# If a version is unavailable, update to latest: pip install --upgrade <package>
+outscraper==5.9.2
+gspread==6.1.2
+google-auth==2.35.0
+PyYAML==6.0.2

@@ -1,0 +1,55 @@
+name: Scrub Squad Daily Leads
+
+# ---------------------------------------------------------------------------
+# Schedule
+# ---------------------------------------------------------------------------
+# Cron fires at 13:00 UTC every day.
+#   • Nov – Mar (EST):  13:00 UTC = 8:00 AM ET   ✓
+#   • Mar – Nov (EDT):  13:00 UTC = 9:00 AM ET   (1-hour DST drift)
+#
+# GitHub Actions has no timezone-aware cron.  The 1-hour seasonal shift
+# is a platform limitation.  Do not investigate it as a bug.
+#
+# Manual trigger is available via "Run workflow" in the GitHub Actions UI.
+# Use it for testing or to kick off an ad-hoc run at any time.
+# ---------------------------------------------------------------------------
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------------
+      # 1. Checkout source code
+      # ---------------------------------------------------------------
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # 2. Python 3.11
+      # ---------------------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ---------------------------------------------------------------
+      # 3. Install dependencies
+      # ---------------------------------------------------------------
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ---------------------------------------------------------------
+      # 4. Run the pipeline
+      #    Secrets are injected as env vars — nothing hits the filesystem.
+      #    Exit code != 0 on PARTIAL_FAILURE or FAILED → job turns red
+      #    and GitHub sends a failure notification email.
+      # ---------------------------------------------------------------
+      - name: Run lead pipeline
+        env:
+          OUTSCRAPER_API_KEY:            ${{ secrets.OUTSCRAPER_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID:               ${{ secrets.GOOGLE_SHEET_ID }}
+        run: python tools/run_pipeline.py

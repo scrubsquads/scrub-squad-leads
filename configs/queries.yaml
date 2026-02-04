@@ -1,0 +1,25 @@
+# Scrub Squad query configuration.
+# The pipeline cross-joins regions x business_types to produce all queries automatically.
+# To add a new region or business type: append to the respective list. No code changes needed.
+#
+# Example: adding a new region
+#   regions:
+#     - "Miami-Dade County, FL, USA"
+#     - "Your New Region, STATE, USA"   <-- just add a line here
+
+regions:
+  - "Miami-Dade County, FL, USA"
+  - "Homestead, FL, USA"
+  - "Key Largo, FL, USA"
+  - "Broward County, FL, USA"
+
+business_types:
+  - "Property Management Companies"
+  - "Medical Offices"
+  - "Construction Companies"
+
+query_template: "{business_type} in {location}"
+
+settings:
+  results_per_query: 20
+  language: "en"
