@@ -131,7 +131,7 @@ def main():
         # --- Google Sheets connection -----------------------------------------
         logger.info("Connecting to Google Sheets…")
         gc         = get_client()
-        spreadsheet = gc.open_by_id(sheet_id)
+        spreadsheet = gc.open_by_key(sheet_id)
         leads_ws   = get_or_create_worksheet(spreadsheet, "Leads",   LEADS_HEADERS)
         run_log_ws = get_or_create_worksheet(spreadsheet, "Run_Log", RUN_LOG_HEADERS)
 
