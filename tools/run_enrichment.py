@@ -48,7 +48,7 @@ from sheets import (                                # noqa: E402
     get_client,
     get_or_create_worksheet,
     log_enrichment_run,
-    read_existing_enriched_place_ids,
+    read_existing_enriched_company_names,
     read_leads_for_enrichment,
 )
 
@@ -169,14 +169,14 @@ def main():
         all_leads = read_leads_for_enrichment(leads_ws)
         logger.info("Total leads in Sheet: %d", len(all_leads))
 
-        logger.info("Reading already-enriched place_ids…")
-        enriched_ids = read_existing_enriched_place_ids(contacts_ws)
-        logger.info("Already enriched: %d", len(enriched_ids))
+        logger.info("Reading already-enriched companies…")
+        enriched_names = read_existing_enriched_company_names(contacts_ws)
+        logger.info("Already enriched: %d companies", len(enriched_names))
 
         # Filter to un-enriched leads, take batch_size
         leads_to_process = [
             lead for lead in all_leads
-            if lead["place_id"] not in enriched_ids
+            if lead["business_name"].strip().lower() not in enriched_names
         ]
         logger.info("Un-enriched leads available: %d", len(leads_to_process))
 

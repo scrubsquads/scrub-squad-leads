@@ -238,17 +238,19 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
     """
     apollo_id = person.get("id", "")
 
+    # Full name
+    first = (person.get("first_name") or "").strip()
+    last = (person.get("last_name") or "").strip()
+    full_name = person.get("name", "").strip() or f"{first} {last}".strip()
+
     # Email — check nested contact object first, then top-level
     email = ""
-    email_status = ""
     contact_info = person.get("contact") or {}
     contact_emails = contact_info.get("contact_emails") or []
     if contact_emails:
         email = contact_emails[0].get("email", "")
-        email_status = contact_emails[0].get("email_status", "")
     if not email:
         email = person.get("email", "") or ""
-        email_status = person.get("email_status", "") or ""
 
     # Phone — check nested contact object first
     phone = ""
@@ -257,21 +259,23 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
         phone = phone_numbers[0].get("sanitized_number", "") or \
                 phone_numbers[0].get("raw_number", "")
 
+    # Company info from Apollo's organization object
+    org = person.get("organization") or {}
+    company_name = (org.get("name") or business_name or "").strip()
+    company_industry = (org.get("industry") or "").strip()
+    company_website = (org.get("website_url") or "").strip()
+
     return {
-        "place_id":          place_id,
-        "business_name":     business_name,
-        "apollo_person_id":  apollo_id,
-        "first_name":        (person.get("first_name") or "").strip(),
-        "last_name":         (person.get("last_name") or "").strip(),
+        "apollo_id":         apollo_id,
+        "full_name":         full_name,
         "title":             (person.get("title") or "").strip(),
+        "seniority":         (person.get("seniority") or "").strip(),
         "email":             email.strip(),
-        "email_status":      email_status.strip(),
         "phone":             phone.strip(),
         "linkedin_url":      (person.get("linkedin_url") or "").strip(),
-        "seniority":         (person.get("seniority") or "").strip(),
-        "enrichment_source": enrichment_source,
-        "enriched_at":       datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "run_date":          run_date,
+        "company_name":      company_name,
+        "company_industry":  company_industry,
+        "company_website":   company_website,
     }
 
 
