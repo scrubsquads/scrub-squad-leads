@@ -54,3 +54,30 @@ jobs:
           GOOGLE_SHEET_ID:               ${{ secrets.GOOGLE_SHEET_ID }}
         run: python tools/run_pipeline.py
 
+  # -----------------------------------------------------------------
+  # Job 2: Enrich new leads with Apollo.io contacts
+  # Runs after scrape completes — only processes un-enriched leads.
+  # Uses batch-size 50 to handle daily volume without burning credits.
+  # -----------------------------------------------------------------
+  enrich:
+    needs: scrape
+    runs-on: ubuntu-latest
+    if: always() && needs.scrape.result != 'cancelled'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run contact enrichment
+        env:
+          APOLLO_API_KEY:               ${{ secrets.APOLLO_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON:  ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID:              ${{ secrets.GOOGLE_SHEET_ID }}
+        run: python tools/run_enrichment.py --batch-size 50
+
