@@ -1,0 +1,61 @@
+name: Scrub Squad Contact Enrichment
+
+# ---------------------------------------------------------------------------
+# Manual trigger only — not scheduled.
+# Go to Actions → "Scrub Squad Contact Enrichment" → "Run workflow"
+# to kick off an enrichment run.
+#
+# Inputs let you control batch size and dry-run mode from the GitHub UI.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Number of leads to enrich (default: 10)'
+        required: false
+        default: '10'
+      dry_run:
+        description: 'Dry run — search only, no credits spent'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------------
+      # 1. Checkout source code
+      # ---------------------------------------------------------------
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # 2. Python 3.11
+      # ---------------------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ---------------------------------------------------------------
+      # 3. Install dependencies
+      # ---------------------------------------------------------------
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ---------------------------------------------------------------
+      # 4. Run contact enrichment
+      #    Batch size and dry-run are controlled via workflow inputs.
+      #    Exit code != 0 on failure → job turns red.
+      # ---------------------------------------------------------------
+      - name: Run contact enrichment
+        env:
+          APOLLO_API_KEY:               ${{ secrets.APOLLO_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON:  ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID:              ${{ secrets.GOOGLE_SHEET_ID }}
+        run: |
+          ARGS="--batch-size ${{ github.event.inputs.batch_size }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python tools/run_enrichment.py $ARGS

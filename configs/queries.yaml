@@ -23,3 +23,30 @@ query_template: "{business_type} in {location}"
 settings:
   results_per_query: 20
   language: "en"
+
+# --- Apollo.io Contact Enrichment ---
+# Used by tools/run_enrichment.py (manual runs).
+# Titles and seniorities control who the pipeline searches for.
+apollo:
+  primary_titles:
+    - "Facility Manager"
+    - "Director of Facilities"
+    - "Office Manager"
+    - "Operations Manager"
+    - "Director of Operations"
+    - "Building Manager"
+    - "Property Manager"
+    - "Maintenance Manager"
+  secondary_titles:          # only used for small companies
+    - "Owner"
+    - "CEO"
+    - "President"
+  target_seniorities:
+    - "owner"
+    - "c_suite"
+    - "director"
+    - "manager"
+  small_company_threshold: 50  # employee count — below this, include Owner/CEO
+  max_contacts_per_company: 2
+  default_batch_size: 10
+  search_per_page: 10

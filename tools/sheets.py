@@ -49,6 +49,39 @@ RUN_LOG_HEADERS = [
     "errors",
 ]
 
+CONTACTS_HEADERS = [
+    "place_id",
+    "business_name",
+    "apollo_person_id",
+    "first_name",
+    "last_name",
+    "title",
+    "email",
+    "email_status",
+    "phone",
+    "linkedin_url",
+    "seniority",
+    "enrichment_source",
+    "enriched_at",
+    "run_date",
+]
+
+ENRICHMENT_LOG_HEADERS = [
+    "run_date",
+    "started_at",
+    "finished_at",
+    "duration_seconds",
+    "leads_processed",
+    "leads_skipped_no_data",
+    "contacts_found",
+    "contacts_enriched",
+    "credits_used",
+    "batch_size",
+    "dry_run",
+    "status",
+    "errors",
+]
+
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -97,6 +130,35 @@ def read_existing_place_ids(worksheet):
     return set(values)
 
 
+def read_existing_enriched_place_ids(worksheet):
+    """Return a set of place_ids already enriched in the Contacts tab.
+
+    Reads column A in a single API call.  Strips the header row.
+    """
+    values = worksheet.col_values(1)
+    if values:
+        values = values[1:]  # drop header
+    return set(values)
+
+
+def read_leads_for_enrichment(worksheet):
+    """Read all leads with the columns needed for Apollo enrichment.
+
+    Returns a list of dicts with keys: place_id, business_name, website.
+    Skips rows with an empty place_id.
+    """
+    records = worksheet.get_all_records()
+    return [
+        {
+            "place_id":      str(r.get("place_id", "")).strip(),
+            "business_name": str(r.get("business_name", "")).strip(),
+            "website":       str(r.get("website", "")).strip(),
+        }
+        for r in records
+        if str(r.get("place_id", "")).strip()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------
@@ -125,3 +187,29 @@ def log_run(worksheet, summary):
     row = [summary.get(h, "") for h in RUN_LOG_HEADERS]
     worksheet.append_row(row, value_input_option="RAW")
     logger.info("Logged run summary to '%s'", worksheet.title)
+
+
+def append_contacts(worksheet, contacts):
+    """Batch-append contact dicts as rows to the Contacts tab.
+
+    Column order matches CONTACTS_HEADERS exactly.
+    """
+    if not contacts:
+        return
+
+    rows = []
+    for contact in contacts:
+        rows.append([contact.get(h, "") for h in CONTACTS_HEADERS])
+
+    worksheet.append_rows(rows, value_input_option="RAW")
+    logger.info("Appended %d contacts to '%s'", len(rows), worksheet.title)
+
+
+def log_enrichment_run(worksheet, summary):
+    """Append one summary row to the Enrichment_Log worksheet.
+
+    Column order matches ENRICHMENT_LOG_HEADERS exactly.
+    """
+    row = [summary.get(h, "") for h in ENRICHMENT_LOG_HEADERS]
+    worksheet.append_row(row, value_input_option="RAW")
+    logger.info("Logged enrichment summary to '%s'", worksheet.title)
