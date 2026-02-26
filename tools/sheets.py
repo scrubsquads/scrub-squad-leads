@@ -50,6 +50,7 @@ RUN_LOG_HEADERS = [
 ]
 
 CONTACTS_HEADERS = [
+    "place_id",
     "apollo_id",
     "full_name",
     "title",
@@ -126,16 +127,16 @@ def read_existing_place_ids(worksheet):
     return set(values)
 
 
-def read_existing_enriched_company_names(worksheet):
-    """Return a set of company_name values already in the Contacts tab.
+def read_existing_enriched_place_ids(worksheet):
+    """Return a set of place_id values already in the Contacts tab.
 
-    Reads column H (company_name) in a single API call.  Strips the header.
-    Used to skip companies that have already been enriched.
+    Reads column A (place_id) in a single API call.  Strips the header.
+    Used to skip leads that have already been enriched.
     """
-    values = worksheet.col_values(8)  # column H = company_name
+    values = worksheet.col_values(1)  # column A = place_id
     if values:
         values = values[1:]  # drop header
-    return set(v.strip().lower() for v in values if v.strip())
+    return set(v.strip() for v in values if v.strip())
 
 
 def read_leads_for_enrichment(worksheet):

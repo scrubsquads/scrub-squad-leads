@@ -269,6 +269,7 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
     company_website = (org.get("website_url") or "").strip()
 
     return {
+        "place_id":          place_id,
         "apollo_id":         apollo_id,
         "full_name":         full_name,
         "title":             (person.get("title") or "").strip(),
