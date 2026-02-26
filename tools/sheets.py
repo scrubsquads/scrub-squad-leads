@@ -141,7 +141,7 @@ def read_existing_enriched_company_names(worksheet):
 def read_leads_for_enrichment(worksheet):
     """Read all leads with the columns needed for Apollo enrichment.
 
-    Returns a list of dicts with keys: place_id, business_name, website.
+    Returns a list of dicts with keys: place_id, business_name, website, phone.
     Skips rows with an empty place_id.
     """
     records = worksheet.get_all_records()
@@ -150,6 +150,7 @@ def read_leads_for_enrichment(worksheet):
             "place_id":      str(r.get("place_id", "")).strip(),
             "business_name": str(r.get("business_name", "")).strip(),
             "website":       str(r.get("website", "")).strip(),
+            "phone":         str(r.get("phone", "")).strip(),
         }
         for r in records
         if str(r.get("place_id", "")).strip()

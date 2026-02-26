@@ -222,7 +222,7 @@ def rank_contacts(people, max_contacts, small_company_threshold):
 
 
 def normalize_contact(person, place_id, business_name, enrichment_source,
-                      run_date):
+                      run_date, fallback_phone=""):
     """Map an enriched Apollo person to our Contacts schema.
 
     Args:
@@ -231,6 +231,8 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
         business_name:      Parent lead's business_name
         enrichment_source:  "domain_search" or "name_search"
         run_date:           Date string for this run
+        fallback_phone:     Company phone from Outscraper (used if Apollo
+                            has no direct phone for the contact)
 
     Returns:
         dict matching CONTACTS_HEADERS column order.
@@ -251,12 +253,14 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
     if not email:
         email = person.get("email", "") or ""
 
-    # Phone — check nested contact object first
+    # Phone — check Apollo first, fall back to Outscraper company phone
     phone = ""
     phone_numbers = contact_info.get("phone_numbers") or []
     if phone_numbers:
         phone = phone_numbers[0].get("sanitized_number", "") or \
                 phone_numbers[0].get("raw_number", "")
+    if not phone:
+        phone = fallback_phone or ""
 
     # Company info from Apollo's organization object
     org = person.get("organization") or {}

@@ -191,6 +191,7 @@ def main():
             place_id = lead["place_id"]
             biz_name = lead["business_name"]
             website = lead["website"]
+            lead_phone = lead.get("phone", "")
 
             logger.info("-" * 50)
             logger.info("[%d/%d] %s", i + 1, len(leads_to_process), biz_name)
@@ -263,6 +264,7 @@ def main():
                     contact = normalize_contact(
                         enriched, place_id, biz_name,
                         enrichment_source, run_date,
+                        fallback_phone=lead_phone,
                     )
                     contacts_for_lead.append(contact)
                     summary["contacts_enriched"] += 1
