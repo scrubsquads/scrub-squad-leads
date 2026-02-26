@@ -156,7 +156,6 @@ def enrich_person(api_key, person_id):
     body = {
         "id": person_id,
         "reveal_personal_emails": True,
-        "reveal_phone_number": True,
     }
 
     url = f"{BASE_URL}/people/match"
