@@ -268,6 +268,17 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
     company_industry = (org.get("industry") or "").strip()
     company_website = (org.get("website_url") or "").strip()
 
+    # Employee count - used downstream to filter out big companies that
+    # have in-house cleaning staff. Empty string if Apollo doesn't have data.
+    emp_count = org.get("estimated_num_employees")
+    if emp_count is None:
+        company_size = ""
+    else:
+        try:
+            company_size = int(emp_count)
+        except (ValueError, TypeError):
+            company_size = ""
+
     return {
         "place_id":          place_id,
         "apollo_id":         apollo_id,
@@ -280,6 +291,7 @@ def normalize_contact(person, place_id, business_name, enrichment_source,
         "company_name":      company_name,
         "company_industry":  company_industry,
         "company_website":   company_website,
+        "company_size":      company_size,
     }
 
 

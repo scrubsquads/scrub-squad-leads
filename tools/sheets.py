@@ -61,6 +61,7 @@ CONTACTS_HEADERS = [
     "company_name",
     "company_industry",
     "company_website",
+    "company_size",
 ]
 
 ENRICHMENT_LOG_HEADERS = [
@@ -142,7 +143,11 @@ def read_existing_enriched_place_ids(worksheet):
 def read_leads_for_enrichment(worksheet):
     """Read all leads with the columns needed for Apollo enrichment.
 
-    Returns a list of dicts with keys: place_id, business_name, website, phone.
+    Returns a list of dicts with keys: place_id, business_name, website,
+    phone, business_type.  business_type is included so a run can be
+    targeted at one segment — Apollo credits are finite and worth spending
+    deliberately rather than in sheet order.
+
     Skips rows with an empty place_id.
     """
     records = worksheet.get_all_records()
@@ -152,6 +157,7 @@ def read_leads_for_enrichment(worksheet):
             "business_name": str(r.get("business_name", "")).strip(),
             "website":       str(r.get("website", "")).strip(),
             "phone":         str(r.get("phone", "")).strip(),
+            "business_type": str(r.get("business_type", "")).strip(),
         }
         for r in records
         if str(r.get("place_id", "")).strip()

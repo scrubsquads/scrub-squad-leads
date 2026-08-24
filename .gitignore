@@ -1,7 +1,13 @@
 # Secrets — never commit
+# Pattern covers .env.bak / .env.local / .env.save etc. A bare ".env" matches
+# only that exact filename, so backups were slipping through untracked.
 .env
+.env.*
+*.env.bak
 credentials.json
 token.json
+*service-account*.json
+*serviceaccount*.json
 
 # Disposable intermediates
 .tmp/

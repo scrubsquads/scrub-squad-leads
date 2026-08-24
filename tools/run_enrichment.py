@@ -28,6 +28,19 @@ from pathlib import Path
 import yaml
 
 # ---------------------------------------------------------------------------
+# Load .env for local runs. GitHub Actions injects these as real env vars, so
+# setdefault means CI values always win. Without this the script could only run
+# inside Actions, which made local testing impossible.
+# ---------------------------------------------------------------------------
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists() and not os.environ.get("GITHUB_ACTIONS"):
+    for _line in _env_path.read_text(encoding="utf-8").splitlines():
+        _s = _line.strip()
+        if _s and not _s.startswith("#") and "=" in _s:
+            _k, _v = _s.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
+# ---------------------------------------------------------------------------
 # Path setup — allow importing sibling modules without a package __init__
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -89,6 +102,22 @@ def _parse_args():
         "--dry-run", action="store_true",
         help="Search only — no enrichment credits spent",
     )
+    parser.add_argument(
+        "--business-type", default=None,
+        help=("Only enrich leads whose business_type contains this string "
+              "(case-insensitive), e.g. 'Property Management'. Credits are "
+              "finite; this spends them on one segment instead of sheet order."),
+    )
+    parser.add_argument(
+        "--max-credits", type=int, default=None,
+        help="Hard stop once this many enrichment credits have been spent.",
+    )
+    parser.add_argument(
+        "--no-filters", action="store_true",
+        help=("Disable the bad-fit and out-of-market screens. By default both "
+              "are ON, because a credit spent on a hospital system or a New "
+              "York head office is a credit wasted."),
+    )
     return parser.parse_args()
 
 
@@ -146,6 +175,11 @@ def main():
         "dry_run":               str(args.dry_run),
         "status":                "SUCCESS",
         "errors":                "",
+        # Diagnostic counters. Not in ENRICHMENT_LOG_HEADERS, so they are
+        # printed but not written to the sheet - log_enrichment_run() reads
+        # by header name and ignores extras.
+        "searched_by_domain":    0,
+        "searched_by_name":      0,
     }
 
     enrichment_log_ws = None
@@ -180,6 +214,58 @@ def main():
         ]
         logger.info("Un-enriched leads available: %d", len(leads_to_process))
 
+        if not args.no_filters:
+            # Reuse the curated blacklist rather than keeping a second copy.
+            from close_classify_new_leads import classify as _classify
+
+            # Copy promises South Florida service; a head office in another
+            # state is not a buyer, and Apollo charges the same either way.
+            SOUTH_FL = {"305", "786", "954", "561", "754"}
+
+            def _area(p):
+                d = "".join(c for c in str(p or "") if c.isdigit())
+                if len(d) == 11 and d.startswith("1"):
+                    d = d[1:]
+                return d[:3] if len(d) == 10 else ""
+
+            kept, dropped_bad, dropped_geo = [], [], []
+            for l in leads_to_process:
+                verdict, reason = _classify(l.get("business_name", ""))
+                if verdict == "DEFINITE_BAD":
+                    dropped_bad.append(f"{l.get('business_name')} [{reason}]")
+                    continue
+                ac = _area(l.get("phone"))
+                if ac and ac not in SOUTH_FL:
+                    dropped_geo.append(f"{l.get('business_name')} [{ac}]")
+                    continue
+                kept.append(l)
+            logger.info("Credit screens: dropped %d bad-fit, %d out-of-market",
+                        len(dropped_bad), len(dropped_geo))
+            for d in dropped_bad[:5]:
+                logger.info("    bad-fit:      %s", d)
+            for d in dropped_geo[:5]:
+                logger.info("    out-of-area:  %s", d)
+            leads_to_process = kept
+
+        if args.business_type:
+            want = args.business_type.lower()
+            before = len(leads_to_process)
+            leads_to_process = [
+                l for l in leads_to_process
+                if want in l.get("business_type", "").lower()
+            ]
+            logger.info("Filtered to business_type ~ %r: %d of %d",
+                        args.business_type, len(leads_to_process), before)
+
+        # Prefer leads that actually have a domain - the name-only fallback
+        # matches ~8% and burns the batch on leads that will not resolve.
+        with_domain = [l for l in leads_to_process if l.get("website", "").strip()]
+        without = [l for l in leads_to_process if not l.get("website", "").strip()]
+        if with_domain:
+            logger.info("Prioritising %d leads with a website over %d without",
+                        len(with_domain), len(without))
+            leads_to_process = with_domain + without
+
         leads_to_process = leads_to_process[:batch_size]
         logger.info("Processing this batch: %d leads", len(leads_to_process))
 
@@ -201,9 +287,14 @@ def main():
                 domain = extract_domain(website)
                 if domain:
                     enrichment_source = "domain_search"
+                    summary["searched_by_domain"] += 1
                     logger.info("  Domain: %s", domain)
                 elif biz_name:
+                    # Name search matches ~8% for small local businesses.
+                    # Tracked separately so a run that is mostly name-fallback
+                    # is visible instead of silently wasting the batch.
                     enrichment_source = "name_search"
+                    summary["searched_by_name"] += 1
                     logger.info("  No domain — falling back to name: %s", biz_name)
                 else:
                     logger.warning("  No domain and no business name — skipping")
@@ -237,6 +328,14 @@ def main():
                     logger.info("  No relevant decision-makers found — skipping")
                     summary["leads_processed"] += 1
                     continue
+
+                # Hard credit ceiling. Apollo's free tier is 100 credits per
+                # billing cycle; without this a large batch silently drains it.
+                if (args.max_credits is not None
+                        and summary["credits_used"] >= args.max_credits):
+                    logger.warning("  Credit ceiling reached (%d) — stopping early",
+                                   args.max_credits)
+                    break
 
                 # 4. Enrich each contact (or skip in dry-run)
                 contacts_for_lead = []
@@ -315,6 +414,27 @@ def main():
         )
         if errors and summary["status"] == "SUCCESS":
             summary["status"] = "PARTIAL_FAILURE"
+
+        # A run that processed a real batch and found NOTHING is a failure,
+        # not a success. Without this, 12 consecutive days of zero-yield runs
+        # logged SUCCESS and nobody noticed the pipeline had stopped producing.
+        #
+        # Threshold matters: a handful of leads legitimately returning nothing
+        # is ordinary variance, so only a batch of decent size counts as
+        # evidence that something is actually broken.
+        BARREN_BATCH_THRESHOLD = 10
+        if (summary["status"] == "SUCCESS"
+                and summary["leads_processed"] >= BARREN_BATCH_THRESHOLD
+                and summary["contacts_found"] == 0):
+            summary["status"] = "NO_RESULTS"
+            errors.append(
+                f"Processed {summary['leads_processed']} leads and found 0 "
+                f"contacts. Domain searches: {summary['searched_by_domain']}, "
+                f"name-only fallbacks: {summary['searched_by_name']}. "
+                "A fully barren batch usually means missing domains or a "
+                "rejected API key, not an empty market."
+            )
+
         summary["errors"] = " | ".join(errors)
 
         if enrichment_log_ws is not None:
@@ -329,6 +449,9 @@ def main():
         logger.info("  Status:              %s", summary["status"])
         logger.info("  Leads processed:     %d", summary["leads_processed"])
         logger.info("  Leads skipped:       %d", summary["leads_skipped_no_data"])
+        logger.info("  Searched by domain:  %d", summary["searched_by_domain"])
+        logger.info("  Searched by name:    %d  (weak path, ~8%% match rate)",
+                    summary["searched_by_name"])
         logger.info("  Contacts found:      %d", summary["contacts_found"])
         logger.info("  Contacts enriched:   %d", summary["contacts_enriched"])
         logger.info("  Credits used:        %d", summary["credits_used"])
