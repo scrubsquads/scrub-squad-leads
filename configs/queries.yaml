@@ -17,6 +17,7 @@ business_types:
   - "Property Management Companies"
   - "Medical Offices"
   - "Construction Companies"
+  - "Real Estate Agencies"
 
 query_template: "{business_type} in {location}"
 
@@ -37,6 +38,10 @@ apollo:
     - "Building Manager"
     - "Property Manager"
     - "Maintenance Manager"
+    - "Realtor"
+    - "Real Estate Agent"
+    - "Real Estate Broker"
+    - "Listing Agent"
   secondary_titles:          # only used for small companies
     - "Owner"
     - "CEO"

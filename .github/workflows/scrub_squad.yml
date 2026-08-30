@@ -108,23 +108,15 @@ jobs:
         run: python tools/close_sync.py
 
   # -----------------------------------------------------------------
-  # Job 4: Auto-subscribe finished sequence leads to Phase 2
-  # Checks Initial Outreach completions → subscribes to Phase 2.
-  # -----------------------------------------------------------------
-  phase2:
-    needs: close_sync
-    runs-on: ubuntu-latest
-    if: always() && needs.close_sync.result != 'cancelled'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Auto-subscribe to Phase 2
-        env:
-          CLOSE_API_KEY:  ${{ secrets.CLOSE_API_KEY }}
-        run: python tools/close_phase2_auto.py
+  # Job 4 (removed 2026-08-30): "Auto-subscribe to Phase 2" used to move
+  # leads who finished the old generic "Initial Outreach - Commercial" /
+  # "Initial Outreach - Education" sequences into "Phase 2 - Commercial
+  # Follow-Up". Both the generic outreach sequences and Phase 2 were
+  # deleted as part of that day's industry-specific outreach migration
+  # (see .tmp/SESSION_HANDOFF.md in the Lead Generation project). This
+  # job's function is now handled by tools/close_monthly_nudge.py, run
+  # from a Hermes cron job on the 1st of each month — an indefinite
+  # monthly nudge across all 7 industry sequences rather than a single
+  # one-time Phase 2 follow-up. See close_build_nudge_sequences.py for
+  # the nudge sequences themselves.
 

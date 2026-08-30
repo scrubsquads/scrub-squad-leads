@@ -55,13 +55,70 @@ SENDER_NAME = None
 DRY_RUN = False
 DRY_RUN_LOG = []
 
+# Reuse the curated blacklist instead of maintaining a second copy here.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from close_classify_new_leads import classify as classify_badfit
+except Exception as _e:  # pragma: no cover
+    logging.warning("Classifier unavailable (%s); bad-fit screen disabled", _e)
+    classify_badfit = lambda name: ("KEEP", "")
+
+# Miami-Dade, Broward (incl. the 754 overlay), Monroe and Palm Beach.
+SOUTH_FL_AREA_CODES = {"305", "786", "954", "561", "754"}
+
+
+def _load_protected():
+    """Current clients that must never be cold-contacted. See
+    configs/do_not_email.txt. Applied here too so a client resurfacing in a
+    future scrape cannot be created and enrolled as a fresh lead."""
+    p = Path(__file__).resolve().parent.parent / "configs" / "do_not_email.txt"
+    if not p.exists():
+        return []
+    return [ln.strip().lower() for ln in p.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+
+
+PROTECTED = _load_protected()
+
+# The Leads sheet stores region as "Miami-Dade County, FL, USA", but the Close
+# Region field is a choices field accepting only these values. Passing the raw
+# sheet string through creates junk choices.
+REGION_MAP = {
+    "miami-dade": "Miami-Dade",
+    "broward": "Broward",
+    "homestead": "Homestead",
+    "key largo": "Key Largo",
+    "monroe": "Key Largo",
+}
+
+
+def map_region(raw):
+    """Normalize a sheet region string onto a valid Close choice, or ''."""
+    r = str(raw or "").lower()
+    for needle, choice in REGION_MAP.items():
+        if needle in r:
+            return choice
+    return ""
+
 # Lead status
 NEW_LEAD_STATUS = "stat_d857QdxZmTJKNUcl1XZMPcLgIG8BcQCylkQqiHstS2q"
 IN_HOUSE_STATUS_LABEL = "In-House"  # ID looked up at runtime via status endpoint
 
-# Sequences
-SEQ_COMMERCIAL = "seq_2Chrg4DReemWf9iAnu3i9R"
-SEQ_EDUCATION = "seq_4RJzLUfIitjgtjJus682KO"
+# Sequences — industry-specific outreach, replaces the old single generic
+# "Commercial" sequence (deleted 2026-08-30 as part of the industry-outreach
+# migration; see .tmp/SESSION_HANDOFF.md). Each industry has its own email
+# sequence now; Industry values that don't match a specific one fall back to
+# the new Commercial catch-all rather than a sequence that no longer exists.
+SEQ_BY_INDUSTRY = {
+    "Property Management": "seq_1cB6ULpeSvoD5rKt9o5Rzu",
+    "Real Estate": "seq_1kcWh8ObaVksKKZ1KL0Lns",
+    "Construction": "seq_16UaJSNyYJlsaznOM9kPgD",
+    "Healthcare": "seq_1vnZAqssyuYviZI4byD4KU",
+    "Warehouse": "seq_1q2Gd2Ckaofo5ZtBOlFYqu",
+    "Education": "seq_4RJzLUfIitjgtjJus682KO",
+}
+SEQ_COMMERCIAL_CATCHALL = "seq_3PIwJBhOUb3c3yyR45yOd7"
+SEQ_EDUCATION = "seq_4RJzLUfIitjgtjJus682KO"  # kept for any other reference
 
 EDUCATION_INDUSTRIES = {"Education"}
 
@@ -158,14 +215,26 @@ def get_status_id(label):
     raise RuntimeError(f"Lead status '{label}' not found in Close")
 
 
-def get_existing_leads_dedup():
-    """Get place_ids AND lead names from Close for dual deduplication.
+def normalize_phone(raw):
+    """10-digit US form, or None. Shared by dedup and the market screen."""
+    d = "".join(c for c in str(raw or "") if c.isdigit())
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    return d if len(d) == 10 else None
 
-    Returns (place_ids: set, lead_names: set).
-    Uses both because older leads may not have Place ID set.
+
+def get_existing_leads_dedup():
+    """Get place_ids, lead names AND phone numbers from Close for dedup.
+
+    Returns (place_ids: set, lead_names: set, phones: set).
+
+    Phone matching matters because name matching only catches exact strings.
+    "reef construction group" and "Reef Construction Group LLC" are the same
+    business on the same number, and name-only dedup created both.
     """
     place_ids = set()
     lead_names = set()
+    phones = set()
     has_more = True
     offset = 0
 
@@ -180,7 +249,9 @@ def get_existing_leads_dedup():
     field_param = f",custom.{place_id_field}" if place_id_field else ""
 
     while has_more:
-        data = close_get(f"lead/?_limit=200&_skip={offset}&_fields=display_name{field_param}")
+        data = close_get(
+            f"lead/?_limit=200&_skip={offset}"
+            f"&_fields=display_name,contacts{field_param}")
         for lead in data.get("data", []):
             # Collect place_id if set.
             # NOTE: when the request uses _fields, Close returns custom fields
@@ -196,10 +267,16 @@ def get_existing_leads_dedup():
             name = lead.get("display_name", "").strip().lower()
             if name:
                 lead_names.add(name)
+            # Collect every phone on the lead
+            for c in lead.get("contacts", []) or []:
+                for p in c.get("phones", []) or []:
+                    n = normalize_phone(p.get("phone"))
+                    if n:
+                        phones.add(n)
         has_more = data.get("has_more", False)
         offset += 200
 
-    return place_ids, lead_names
+    return place_ids, lead_names, phones
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +342,7 @@ def create_lead_in_close(lead, contacts, field_map, in_house_status_id):
     # Build custom fields
     custom = {}
     field_mappings = {
-        "Region": lead.get("region", ""),
+        "Region": map_region(lead.get("region", "")),
         "Place ID": lead.get("place_id", ""),
         "Google Maps Link": lead.get("google_maps_link", ""),
     }
@@ -375,15 +452,17 @@ def create_lead_in_close(lead, contacts, field_map, in_house_status_id):
     if not result:
         return None, None, False
 
-    # Get first contact ID (for sequence subscription)
+    # Get a contact to subscribe to the email sequence.
+    #
+    # This used to fall back to contacts[0] when nobody had an email, which
+    # queued a subscription for a contact with nowhere to send. In a dry run
+    # of 428 leads that meant 428 subscriptions against only 72 real email
+    # addresses. No email, no subscription.
     first_contact_id = None
-    if result.get("contacts"):
-        for contact in result["contacts"]:
-            if contact.get("emails"):
-                first_contact_id = contact["id"]
-                break
-        if not first_contact_id and result["contacts"]:
-            first_contact_id = result["contacts"][0]["id"]
+    for contact in result.get("contacts") or []:
+        if contact.get("emails"):
+            first_contact_id = contact["id"]
+            break
 
     return result, first_contact_id, is_too_big
 
@@ -440,6 +519,14 @@ def main():
                     help="Rehearse the sync without writing anything to Close.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Process at most N new leads (useful with --dry-run).")
+    ap.add_argument("--max-subscriptions", type=int, default=None,
+                    help=("Enroll at most N contacts in email sequences. Leads "
+                          "are still created. Creating clean records and "
+                          "starting a cold campaign are separate decisions, "
+                          "and a domain with no cold-send history should ramp "
+                          "slowly rather than open with 128 messages."))
+    ap.add_argument("--no-subscribe", action="store_true",
+                    help="Create leads only. No sequence enrollment at all.")
     args = ap.parse_args()
     DRY_RUN = args.dry_run
 
@@ -473,8 +560,9 @@ def main():
 
     # 2. Get existing leads from Close (for dedup by place_id + name)
     print("Loading existing leads from Close...")
-    existing_pids, existing_names = get_existing_leads_dedup()
-    print(f"  {len(existing_pids)} leads with Place ID, {len(existing_names)} total lead names")
+    existing_pids, existing_names, existing_phones = get_existing_leads_dedup()
+    print(f"  {len(existing_pids)} with Place ID, {len(existing_names)} names, "
+          f"{len(existing_phones)} phone numbers")
 
     # 3. Read leads + contacts from Google Sheets
     print("Reading Google Sheets...")
@@ -493,25 +581,76 @@ def main():
         if pid:
             contacts_by_pid.setdefault(pid, []).append(c)
 
-    # 4. Find new leads not in Close (check both place_id AND name)
+    # 4. Find new leads not already in Close, and screen out the ones that
+    #    should never have been queued in the first place.
+    #
+    #    A dry run of this sync before these screens existed would have created
+    #    428 leads including 21 phone-duplicates of existing records, 45
+    #    duplicates within the batch itself, 16 leads the classifier already
+    #    rejects (Baptist Health, Mount Sinai, Jackson Memorial, the Florida
+    #    Department of Health), 46 out-of-market numbers and 24 toll-free.
     new_leads = []
     skipped_pid = 0
     skipped_name = 0
+    skipped_phone = 0
+    skipped_badfit = []
+    skipped_protected = []
+    skipped_market = 0
+    batch_phones = set()
+
     for lead in all_leads:
         pid = str(lead.get("place_id", "")).strip()
-        name = str(lead.get("business_name", "")).strip().lower()
+        raw_name = str(lead.get("business_name", "")).strip()
+        name = raw_name.lower()
+        phone = normalize_phone(lead.get("phone"))
+
         if pid and pid in existing_pids:
             skipped_pid += 1
             continue
         if name and name in existing_names:
             skipped_name += 1
             continue
+
+        # Same number already on a lead in Close, or earlier in this batch
+        if phone and (phone in existing_phones or phone in batch_phones):
+            skipped_phone += 1
+            continue
+
+        blob = f"{raw_name} {lead.get('email', '')} {lead.get('website', '')}".lower()
+        prot = next((p for p in PROTECTED if p in blob), None)
+        if prot:
+            skipped_protected.append(f"{raw_name} [matched '{prot}']")
+            continue
+
+        verdict, reason = classify_badfit(raw_name)
+        if verdict == "DEFINITE_BAD":
+            skipped_badfit.append(f"{raw_name} [{reason}]")
+            continue
+
+        # Copy and service area are South Florida. A toll-free or out-of-state
+        # number is either unreachable or not a local buyer.
+        if phone and phone[:3] not in SOUTH_FL_AREA_CODES:
+            skipped_market += 1
+            continue
+
         if pid:
+            if phone:
+                batch_phones.add(phone)
             new_leads.append(lead)
 
-    print(f"\n  Skipped (Place ID match): {skipped_pid}")
-    print(f"  Skipped (name match): {skipped_name}")
-    print(f"  New leads to sync: {len(new_leads)}")
+    print(f"\n  Skipped (Place ID match):   {skipped_pid}")
+    print(f"  Skipped (name match):       {skipped_name}")
+    print(f"  Skipped (phone duplicate):  {skipped_phone}")
+    print(f"  Skipped (protected client): {len(skipped_protected)}")
+    print(f"  Skipped (bad fit):          {len(skipped_badfit)}")
+    print(f"  Skipped (out of market):    {skipped_market}")
+    print(f"  New leads to sync:          {len(new_leads)}")
+    if skipped_badfit:
+        print("\n  Bad-fit leads screened out:")
+        for b in skipped_badfit[:20]:
+            print(f"    - {b}")
+        if len(skipped_badfit) > 20:
+            print(f"    ... and {len(skipped_badfit) - 20} more")
 
     if not new_leads:
         print("Nothing to sync. All leads already in Close.")
@@ -526,6 +665,7 @@ def main():
     created = 0
     subscribed = 0
     routed_in_house = 0
+    subscription_capped = 0
     errors = 0
 
     for i, lead in enumerate(new_leads):
@@ -556,11 +696,15 @@ def main():
                 if industry in EDUCATION_INDUSTRIES:
                     seq_id = SEQ_EDUCATION
                 else:
-                    seq_id = SEQ_COMMERCIAL
+                    seq_id = SEQ_BY_INDUSTRY.get(industry, SEQ_COMMERCIAL_CATCHALL)
 
-                if contact_id:
+                at_cap = (args.max_subscriptions is not None
+                          and subscribed >= args.max_subscriptions)
+                if contact_id and not args.no_subscribe and not at_cap:
                     if subscribe_to_sequence(contact_id, seq_id):
                         subscribed += 1
+                elif contact_id and at_cap:
+                    subscription_capped += 1
 
             if (i + 1) % 25 == 0:
                 print(f"  Progress: {i + 1}/{len(new_leads)} "
@@ -578,6 +722,11 @@ def main():
     print(f"    - New Lead (active funnel): {created - routed_in_house}")
     print(f"    - Auto-routed to In-House (>{MAX_COMPANY_SIZE_FOR_NEW_LEAD} employees): {routed_in_house}")
     print(f"  Subscribed to sequences: {subscribed}")
+    if subscription_capped:
+        print(f"    - held back by --max-subscriptions: {subscription_capped} "
+              f"(emailable, not yet enrolled)")
+    if args.no_subscribe:
+        print("    - --no-subscribe: sequence enrollment skipped entirely")
     print(f"  Errors: {errors}")
     print(f"  Already in Close (skipped): {len(existing_pids)}")
 

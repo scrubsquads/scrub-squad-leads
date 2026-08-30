@@ -1,0 +1,21 @@
+# Protected accounts - never enrol in outreach sequences or SMS campaigns.
+#
+# One entry per line. Matching is case-insensitive substring, checked against
+# the lead name, every contact name, and every email address on the lead.
+# Comments start with #.
+#
+# Current clients and anyone who must never receive cold outreach belong here.
+# This is a belt-and-braces layer: lead status should ALSO be Customer, but
+# statuses drift and this file does not.
+
+# --- current clients (confirmed 2026-08-24) ---
+BHA Jewelry
+bhajewelry.com
+Costa Del Sol Golf Club
+cdsgolfclub.com
+Mariela Osorio
+
+# Julina Jensen - named as a current client but no matching record exists in
+# Close. Listed so that if the record is ever created it is protected from
+# day one.
+Julina Jensen
