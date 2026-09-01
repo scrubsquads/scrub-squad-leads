@@ -79,6 +79,7 @@ jobs:
           APOLLO_API_KEY:               ${{ secrets.APOLLO_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON:  ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID:              ${{ secrets.GOOGLE_SHEET_ID }}
+          CLOSE_API_KEY:                ${{ secrets.CLOSE_API_KEY }}
         run: python tools/run_enrichment.py --batch-size 50
 
   # -----------------------------------------------------------------
