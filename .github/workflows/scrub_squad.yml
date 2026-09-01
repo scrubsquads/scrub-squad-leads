@@ -109,7 +109,37 @@ jobs:
         run: python tools/close_sync.py
 
   # -----------------------------------------------------------------
-  # Job 4 (removed 2026-08-30): "Auto-subscribe to Phase 2" used to move
+  # Job 4: Catch phone-only leads that close_sync's email enrollment
+  # can't reach (Apollo enrichment has near-zero coverage for small
+  # South Florida businesses, so most leads never get an email address).
+  # Enrolls anyone with a usable phone into their industry's SMS
+  # sequence instead, so no eligible lead sits outside every campaign.
+  # Bounded per-run limit keeps a backlog day from opening at full
+  # volume; safe to re-run daily since already-sequenced leads are
+  # always skipped.
+  # -----------------------------------------------------------------
+  sms_enroll:
+    needs: close_sync
+    runs-on: ubuntu-latest
+    if: always() && needs.close_sync.result != 'cancelled'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Enroll phone-only leads into SMS sequences
+        env:
+          CLOSE_API_KEY:               ${{ secrets.CLOSE_API_KEY }}
+        run: python tools/close_enroll_sms_sequence.py --all-industries --limit 150 --apply
+
+  # -----------------------------------------------------------------
+  # Job 5 (removed 2026-08-30): "Auto-subscribe to Phase 2" used to move
   # leads who finished the old generic "Initial Outreach - Commercial" /
   # "Initial Outreach - Education" sequences into "Phase 2 - Commercial
   # Follow-Up". Both the generic outreach sequences and Phase 2 were
