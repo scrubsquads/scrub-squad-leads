@@ -70,6 +70,14 @@ OUTREACH_STATUSES = {"New Lead", "Attempting Contact", "Contacted",
 SOUTH_FL = {"305", "786", "954", "561", "754"}
 TOLLFREE_PREFIXES = {"800", "888", "877", "866", "855", "844", "833", "822"}
 
+# Record Type values that must NEVER be enrolled in Scrub Squad's cleaning-
+# outreach sequences. "Vending Lead" belongs to the separate Love For Snacks
+# vending business; it lives in this same Close org for budget reasons but
+# must never receive a Scrub Squad SMS. See incident 2026-09-02: this script's
+# missing Record Type filter caused 93 vending leads to get cold-texted with
+# the Scrub Squad cleaning pitch minutes after being created.
+EXCLUDED_RECORD_TYPES = {"Vending Lead"}
+
 # Industry value (Close custom field) -> SMS sequence name
 SMS_SEQ_BY_INDUSTRY = {
     "Property Management": "Realtor & Property Manager SMS Outreach",
@@ -175,6 +183,7 @@ def main():
 
     cfs = {f["name"]: f["id"] for f in call("custom_field/lead/")["data"]}
     ind_key = f"custom.{cfs['Industry']}" if "Industry" in cfs else None
+    rt_key = f"custom.{cfs['Record Type']}" if "Record Type" in cfs else None
 
     # Any active/goal/finished/paused subscription (on ANY sequence, email or
     # SMS) blocks re-enrollment - a lead already talking to us on email
@@ -182,10 +191,15 @@ def main():
     BLOCKING = {"active", "goal", "finished", "paused"}
     blocked_leads = set()
     for s in sequences:
-        res = call(f"sequence_subscription/?sequence_id={s['id']}")
-        for sub in res.get("data", []):
-            if sub.get("status") in BLOCKING and sub.get("lead_id"):
-                blocked_leads.add(sub["lead_id"])
+        skip = 0
+        while True:
+            res = call(f"sequence_subscription/?sequence_id={s['id']}&_skip={skip}&_limit=100")
+            for sub in res.get("data", []):
+                if sub.get("status") in BLOCKING and sub.get("lead_id"):
+                    blocked_leads.add(sub["lead_id"])
+            if not res.get("has_more"):
+                break
+            skip += 100
     logger.info("Already sequenced (any sequence, non-error): %d leads", len(blocked_leads))
 
     logger.info("\nLoading leads...")
@@ -213,6 +227,11 @@ def main():
             continue
         if args.status and status != args.status:
             drop["status filter"] += 1
+            continue
+
+        record_type = (lead.get(rt_key) or "") if rt_key else ""
+        if record_type in EXCLUDED_RECORD_TYPES:
+            drop[f"excluded record type ({record_type})"] += 1
             continue
 
         blob = " ".join([
